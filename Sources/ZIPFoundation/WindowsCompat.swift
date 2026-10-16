@@ -84,7 +84,9 @@ func lstat(_ path: UnsafePointer<CChar>, _ buf: UnsafeMutablePointer<stat>) -> I
 
     var st = stat()
     st.st_mode = mode
-    st.st_size = Int64(attrData.nFileSizeHigh) << 32 | Int64(attrData.nFileSizeLow)
+    // Note: st_size is 32-bit off_t on Windows; clamp huge files.
+    let fileSize = Int64(attrData.nFileSizeHigh) << 32 | Int64(attrData.nFileSizeLow)
+    st.st_size = off_t(clamping: fileSize)
     st.st_atime = fileTimeToUnixTime(attrData.ftLastAccessTime)
     st.st_mtime = fileTimeToUnixTime(attrData.ftLastWriteTime)
     st.st_ctime = fileTimeToUnixTime(attrData.ftCreationTime)
