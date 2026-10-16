@@ -22,4 +22,9 @@ func ftello(_ stream: UnsafeMutablePointer<FILE>) -> Int64 {
     return _ftelli64(stream)
 }
 
+// MSVC has no ftruncate(2); _chsize_s is the CRT equivalent.
+func ftruncate(_ fd: Int32, _ length: off_t) -> Int32 {
+    return _chsize_s(fd, Int64(length))
+}
+
 #endif
