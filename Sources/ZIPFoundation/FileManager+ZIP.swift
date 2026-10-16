@@ -280,14 +280,15 @@ extension FileManager {
         lstat(entryFileSystemRepresentation, &fileStat)
 #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
         let modTimeSpec = fileStat.st_mtimespec
+        let timeStamp = TimeInterval(modTimeSpec.tv_sec) + TimeInterval(modTimeSpec.tv_nsec)/1000000000.0
 #elseif os(Windows)
         // MSVC's struct _stat has no st_mtim; st_mtime carries whole seconds.
-        return Date(timeIntervalSince1970: TimeInterval(fileStat.st_mtime))
+        let timeStamp = TimeInterval(fileStat.st_mtime)
 #else
         let modTimeSpec = fileStat.st_mtim
+        let timeStamp = TimeInterval(modTimeSpec.tv_sec) + TimeInterval(modTimeSpec.tv_nsec)/1000000000.0
 #endif
 
-        let timeStamp = TimeInterval(modTimeSpec.tv_sec) + TimeInterval(modTimeSpec.tv_nsec)/1000000000.0
         let modDate = Date(timeIntervalSince1970: timeStamp)
         return modDate
     }

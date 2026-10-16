@@ -10,6 +10,7 @@
 import Foundation
 
 #if os(Windows)
+import WinSDK
 
 // MSVC names the 64-bit file-positioning functions _fseeki64/_ftelli64.
 // Re-expose them under the POSIX names used by the rest of the module so
@@ -57,10 +58,44 @@ struct timeval {
     }
 }
 
-/// Windows has no `lstat(2)`. `_stat` follows symlinks, which is the closest
-/// available semantic for ZIP's file-attribute queries.
+/// Windows has no `lstat(2)` and the UCRT `_stat` is not visible to Swift.
+/// Implement it via GetFileAttributesExW (which, like lstat, does not
+/// follow the final path component's reparse point for attribute purposes).
 func lstat(_ path: UnsafePointer<CChar>, _ buf: UnsafeMutablePointer<stat>) -> Int32 {
-    return _stat(path, buf)
+    let widePath: [UInt16] = Array(String(cString: path).utf16) + [0]
+    var attrData = WIN32_FILE_ATTRIBUTE_DATA()
+    let ok: Bool = widePath.withUnsafeBufferPointer { pathPtr in
+        withUnsafeMutableBytes(of: &attrData) { attrBytes in
+            GetFileAttributesExW(pathPtr.baseAddress, GetFileExInfoStandard, attrBytes.baseAddress)
+        }
+    }
+    guard ok else { return -1 }
+
+    let attrs = attrData.dwFileAttributes
+    var mode: mode_t = S_IFREG
+    if attrs & DWORD(FILE_ATTRIBUTE_DIRECTORY) != 0 {
+        mode = S_IFDIR
+    }
+    // Approximate POSIX permissions from the readonly attribute.
+    mode |= 0o444
+    if attrs & DWORD(FILE_ATTRIBUTE_READONLY) == 0 {
+        mode |= 0o222
+    }
+
+    var st = stat()
+    st.st_mode = mode
+    st.st_size = Int64(attrData.nFileSizeHigh) << 32 | Int64(attrData.nFileSizeLow)
+    st.st_atime = fileTimeToUnixTime(attrData.ftLastAccessTime)
+    st.st_mtime = fileTimeToUnixTime(attrData.ftLastWriteTime)
+    st.st_ctime = fileTimeToUnixTime(attrData.ftCreationTime)
+    buf.pointee = st
+    return 0
+}
+
+/// FILETIME (100ns ticks since 1601-01-01) -> Unix time_t (seconds since 1970-01-01).
+private func fileTimeToUnixTime(_ ft: FILETIME) -> time_t {
+    let ticks = Int64(ft.dwHighDateTime) << 32 | Int64(ft.dwLowDateTime)
+    return time_t(ticks / 10_000_000 - 11644473600)
 }
 
 /// Windows has no `lchmod(2)`; `_chmod` follows symlinks.
