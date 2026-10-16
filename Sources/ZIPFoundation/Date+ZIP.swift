@@ -51,7 +51,12 @@ extension Date {
         unixTime.tm_mon -= 1 // UNIX time struct month entries are zero based.
         unixTime.tm_year = Int32(1980+(msdosDateTime>>25))
         unixTime.tm_year -= 1900 // UNIX time structs count in "years since 1900".
+#if os(Windows)
+        // The UCRT has no timegm(3); _mkgmtime is the equivalent.
+        let time = _mkgmtime(&unixTime)
+#else
         let time = timegm(&unixTime)
+#endif
         self = Date(timeIntervalSince1970: TimeInterval(time))
     }
 
@@ -79,6 +84,9 @@ extension stat {
     var lastAccessDate: Date {
 #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS)
         return Date(timespec: st_atimespec)
+#elseif os(Windows)
+        // MSVC's struct _stat has no st_atim; st_atime carries whole seconds.
+        return Date(timeIntervalSince1970: TimeInterval(st_atime))
 #else
         return Date(timespec: st_atim)
 #endif
