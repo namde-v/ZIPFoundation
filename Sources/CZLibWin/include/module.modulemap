@@ -1,0 +1,13 @@
+//
+//  module.modulemap
+//  ZIPFoundation (namde-v fork)
+//
+//  Windows-only CZlib target (see Package.swift): the vendored zlib 1.3.1
+//  sources in ../zlib. The module name stays CZlib so the Swift sources
+//  need no changes.
+//
+
+module CZlib {
+    header "zlib.h"
+    export *
+}
