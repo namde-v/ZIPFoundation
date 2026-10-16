@@ -11,6 +11,15 @@
 #ifndef zlib_shim_h 
 #define zlib_shim_h
 
+#if defined(_WIN32)
+// Windows has no system zlib.h and clang-cl rejects `#import` (unsupported
+// Microsoft feature). On Windows the CZlib module is the vendored-zlib C
+// target (Sources/CZLibWin, see Package.swift), so this shim is never
+// compiled there; keep it a harmless stub anyway, mirroring the
+// CZlibHost/RCZlib pattern used by the LightTouch cross-platform port.
+typedef void *CZlibDummy;
+#else
+
 #import <stdio.h>
 #import <zlib.h>
 
@@ -27,4 +36,6 @@
 #  define _LFS64_LARGEFILE 1
 #endif
 
-#endif
+#endif /* _WIN32 */
+
+#endif /* zlib_shim_h */
