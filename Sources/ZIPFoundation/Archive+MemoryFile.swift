@@ -22,12 +22,23 @@ extension Archive {
 
         private(set) var data: Data
         private var offset = 0
+        #if os(Windows)
+        // Windows has neither funopen(3) nor fopencookie(3): the in-memory
+        // archive is backed by a temporary file instead (see openTempFile).
+        private var tempFileURL: URL?
+        #endif
 
         init(data: Data = Data()) {
             self.data = data
         }
 
         func open(mode: AccessMode) throws -> FILEPointer {
+            #if os(Windows)
+            guard let result = self.openTempFile(mode: mode) else {
+                throw MemoryFileError.invalidMemoryFile
+            }
+            return result
+            #else
             let cookie = Unmanaged.passRetained(self)
             #if os(macOS) || os(iOS) || os(tvOS) || os(visionOS) || os(watchOS) || os(Android)
             guard let result = mode.isWritable
@@ -40,11 +51,31 @@ extension Archive {
             else { throw MemoryFileError.invalidMemoryFile }
             #endif
             return result
+            #endif
         }
+
+        #if os(Windows)
+        deinit {
+            // The FILE* is already closed by Archive's deinit at this point.
+            if let url = self.tempFileURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        #endif
     }
 
     /// Returns a `Data` object containing a representation of the receiver.
-    public var data: Data? { return self.memoryFile?.data }
+    public var data: Data? {
+        #if os(Windows)
+        // Temp-file backed on Windows: flush buffered writes and sync the
+        // file back into `data` before handing it out.
+        if self.isMemoryArchive {
+            fflush(self.archiveFile)
+            self.memoryFile?.syncDataFromTempFile()
+        }
+        #endif
+        return self.memoryFile?.data
+    }
 }
 
 public enum MemoryFileError: Error {
@@ -131,18 +162,7 @@ private func seekStub(_ cookie: UnsafeMutableRawPointer?,
     return fpos_t(fileFromCookie(cookie: cookie).seek(offset: Int(offset), whence: whence))
 }
 
-#else
-
-extension Archive.AccessMode {
-
-    var posixMode: String {
-        switch self {
-        case .read: return "rb"
-        case .create: return "wb+"
-        case .update: return "rb+"
-        }
-    }
-}
+#elseif os(Linux)
 
 private func readStub(_ cookie: UnsafeMutableRawPointer?,
                       _ bytePtr: UnsafeMutablePointer<Int8>?,
@@ -172,5 +192,51 @@ private func seekStub(_ cookie: UnsafeMutableRawPointer?,
         return -1
     }
 }
+#endif
+
+#if os(Linux) || os(Windows)
+
+// Shared by the fopencookie (Linux) and temp-file (Windows) backing stores.
+extension Archive.AccessMode {
+
+    var posixMode: String {
+        switch self {
+        case .read: return "rb"
+        case .create: return "wb+"
+        case .update: return "rb+"
+        }
+    }
+
+}
+
+#endif
+
+#if os(Windows)
+
+// Windows has neither funopen(3) nor fopencookie(3), so the in-memory
+// archive is backed by a temporary file. Written bytes are synced back
+// into `data` on demand (see `Archive.data`) and the temp file is removed
+// when the MemoryFile is deallocated.
+extension Archive.MemoryFile {
+
+    fileprivate func openTempFile(mode: Archive.AccessMode) -> FILEPointer? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ZIPFoundation-\(UUID().uuidString).tmp")
+        if mode != .create {
+            do { try self.data.write(to: url) } catch { return nil }
+        }
+        guard let file = fopen(url.path, mode.posixMode) else { return nil }
+        self.tempFileURL = url
+        return file
+    }
+
+    fileprivate func syncDataFromTempFile() {
+        guard let url = self.tempFileURL else { return }
+        if let data = try? Data(contentsOf: url) {
+            self.data = data
+        }
+    }
+}
+
 #endif
 #endif
